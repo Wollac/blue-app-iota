@@ -5,6 +5,7 @@
 #include "os.h"
 
 #define UINT32_WIDTH 32
+#define UINT16_WIDTH 16
 
 // numer of u32 elements in one bigint array
 #define BIGINT_LENGTH 12
@@ -184,42 +185,58 @@ static unsigned int bigint_add_u32_mem(uint32_t *a, uint32_t summand)
     return BIGINT_LENGTH;
 }
 
-/** @brief multiplies a single 32-bit integer with a bigint.
+/** @brief multiplies a single 16-bit unsigned integer with a bigint.
  *  @param ms_index the index of the most significant non-zero word of the
  *                  input integer. Words after this are not considered.
  *  @return the carry (one word) of the multiplication up to the byte which has
             the index specified in msb_index.
  */
-static uint32_t bigint_mult_u32_mem(uint32_t *a, uint32_t factor,
+static uint32_t bigint_mult_u16_mem(uint32_t *a, uint16_t factor,
                                     unsigned int ms_index)
 {
     uint32_t carry = 0;
 
     for (unsigned int i = 0; i <= ms_index; i++) {
-        const uint64_t v = (uint64_t)factor * a[i] + carry;
+        uint_fast16_t upper = a[i] >> UINT16_WIDTH;
+        uint_fast16_t lower = a[i] & UINT16_MAX;
 
-        carry = v >> UINT32_WIDTH;
-        a[i] = v & UINT32_MAX;
+        uint32_t v = (uint32_t)factor * lower + carry;
+        carry = v >> UINT16_WIDTH;
+        lower = v & UINT16_MAX;
+
+        v = (uint32_t)factor * upper + carry;
+        carry = v >> UINT16_WIDTH;
+        upper = v & UINT16_MAX;
+
+        a[i] = (upper << UINT16_WIDTH) | lower;
     }
 
     return carry;
 }
 
-/** @brief devides a bigint by a single 32-bit integer.
+/** @brief devides a bigint by a single 16-bit unsigned integer.
  *  @param ms_index the index of the most significant non-zero word of the
  *                  input integer. Words after this are not considered.
  *  @return remainder of the integer division.
  */
-static uint32_t bigint_div_u32_mem(uint32_t *a, uint32_t divisor,
+static uint32_t bigint_div_u16_mem(uint32_t *a, uint16_t divisor,
                                    unsigned int ms_index)
 {
     uint32_t remainder = 0;
 
     for (unsigned int i = ms_index + 1; i-- > 0;) {
-        const uint64_t v = ((uint64_t)remainder << UINT32_WIDTH) | a[i];
+        uint_fast16_t upper = a[i] >> UINT16_WIDTH;
+        uint_fast16_t lower = a[i] & UINT16_MAX;
 
-        remainder = (v % divisor) & UINT32_MAX;
-        a[i] = (v / divisor) & UINT32_MAX;
+        uint32_t v = (remainder << UINT16_WIDTH) | upper;
+        upper = (v / divisor) & UINT16_MAX;
+        remainder = (v % divisor) & UINT16_MAX;
+
+        v = (remainder << UINT16_WIDTH) | lower;
+        lower = (v / divisor) & UINT16_MAX;
+        remainder = (v % divisor) & UINT16_MAX;
+
+        a[i] = (upper << UINT16_WIDTH) | lower;
     }
 
     return remainder;
@@ -260,7 +277,7 @@ static void trytes_to_bigint(const tryte_t *trytes, uint32_t *bigint)
         const uint8_t tryte = trytes[i] + (TRYTE_BASE / 2);
 
         const uint32_t carry =
-            bigint_mult_u32_mem(bigint, TRYTE_BASE, ms_index);
+            bigint_mult_u16_mem(bigint, TRYTE_BASE, ms_index);
         if (carry > 0 && ms_index < BIGINT_LENGTH - 1) {
             // if there is a carry, we need to use the next higher word
             bigint[++ms_index] = carry;
@@ -303,7 +320,7 @@ static void bigint_to_trytes_mem(uint32_t *bigint, tryte_t *trytes)
     // it is safe to assume that initially each word is non-zero
     unsigned int ms_index = BIGINT_LENGTH - 1;
     for (unsigned int i = 0; i < NUM_CHUNK_TRYTES - 1; i++) {
-        const uint32_t rem = bigint_div_u32_mem(bigint, TRYTE_BASE, ms_index);
+        const uint32_t rem = bigint_div_u16_mem(bigint, TRYTE_BASE, ms_index);
         trytes[i] = rem - (TRYTE_BASE / 2); // convert back to balanced
 
         // decrement index, if most significant word turned zero
