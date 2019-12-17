@@ -17,8 +17,10 @@
 // base of the ternary system
 #define BASE 3
 
-// base of the ternary system represented in bytes
-#define TRYTE_BASE 27
+// radix used in the conversion
+#define TRYTE_RADIX 27
+// the middle of the domain described by one tryte
+#define HALF_TRYTE (TRYTE_RADIX / 2)
 
 // the middle of the domain described by 242 trits, i.e. \sum_{k=0}^{241} 3^k
 static const uint32_t HALF_3[BIGINT_LENGTH] = {
@@ -195,8 +197,8 @@ static uint32_t bigint_mult_u16_mem(uint32_t *a, uint16_t factor,
                                     unsigned int ms_index)
 {
     uint32_t carry = 0;
-
     for (unsigned int i = 0; i <= ms_index; i++) {
+        // Cortex-M0 does not have a 32->64 multiplication opcode
         uint_fast16_t upper = a[i] >> UINT16_WIDTH;
         uint_fast16_t lower = a[i] & UINT16_MAX;
 
@@ -223,7 +225,6 @@ static uint32_t bigint_div_u16_mem(uint32_t *a, uint16_t divisor,
                                    unsigned int ms_index)
 {
     uint32_t remainder = 0;
-
     for (unsigned int i = ms_index + 1; i-- > 0;) {
         uint_fast16_t upper = a[i] >> UINT16_WIDTH;
         uint_fast16_t lower = a[i] & UINT16_MAX;
@@ -265,33 +266,26 @@ static bool bigint_set_last_trit_zero(uint32_t *bigint)
 
 static void trytes_to_bigint(const tryte_t *trytes, uint32_t *bigint)
 {
-    // initialy there is no non-zero word
-    unsigned int ms_index = 0;
     os_memset(bigint, 0, BIGINT_LENGTH * sizeof(bigint[0]));
-
     // special case for the last tryte only holding two trits of value
     bigint[0] = tryte_set_last_trit_zero(trytes[NUM_CHUNK_TRYTES - 1]) + 4;
 
+    // initially, all words of the bigint are zero
+    unsigned int nz_index = 0;
     for (unsigned int i = NUM_CHUNK_TRYTES - 1; i-- > 0;) {
-        // convert to non-balanced ternary
-        const uint8_t tryte = trytes[i] + (TRYTE_BASE / 2);
-
+        // first, multiply the bigint by the radix
         const uint32_t carry =
-            bigint_mult_u16_mem(bigint, TRYTE_BASE, ms_index);
-        if (carry > 0 && ms_index < BIGINT_LENGTH - 1) {
-            // if there is a carry, we need to use the next higher word
-            bigint[++ms_index] = carry;
+            bigint_mult_u16_mem(bigint, TRYTE_RADIX, nz_index);
+        if (carry > 0 && nz_index < BIGINT_LENGTH - 1) {
+            bigint[++nz_index] = carry;
         }
 
-        if (tryte == 0) {
-            // nothing to add
-            continue;
-        }
-
+        // then, add the non-balanced tryte value
         const unsigned int last_changed_index =
-            bigint_add_u32_mem(bigint, tryte);
-        if (last_changed_index > ms_index) {
-            ms_index = last_changed_index;
+            bigint_add_u32_mem(bigint, trytes[i] + HALF_TRYTE);
+        // adapt the non-zero index, if we had an overflow
+        if (last_changed_index > nz_index) {
+            nz_index = last_changed_index;
         }
     }
 
@@ -310,28 +304,30 @@ static void trits_to_bigint(const trit_t *trits, uint32_t *bigint)
 
 static void bigint_to_trytes_mem(uint32_t *bigint, tryte_t *trytes)
 {
-    // the two's complement represention is only correct, if the number fits
+    // the two's complement representation is only correct, if the number fits
     // into 48 bytes, i.e. has the 243th trit set to 0
     bigint_set_last_trit_zero(bigint);
 
-    // convert to the (positive) number representing non-balanced ternary
+    // convert to the unsigned bigint representing non-balanced ternary
     bigint_add(bigint, bigint, HALF_3);
 
-    // it is safe to assume that initially each word is non-zero
-    unsigned int ms_index = BIGINT_LENGTH - 1;
+    // initially, all words of the bigint are non-zero
+    unsigned int nz_index = BIGINT_LENGTH - 1;
     for (unsigned int i = 0; i < NUM_CHUNK_TRYTES - 1; i++) {
-        const uint32_t rem = bigint_div_u16_mem(bigint, TRYTE_BASE, ms_index);
-        trytes[i] = rem - (TRYTE_BASE / 2); // convert back to balanced
+        // divide the bigint by the radix
+        const uint32_t rem = bigint_div_u16_mem(bigint, TRYTE_RADIX, nz_index);
+        // the tryte is the remainder converted back to balanced ternary
+        trytes[i] = rem - HALF_TRYTE;
 
-        // decrement index, if most significant word turned zero
-        if (ms_index > 0 && bigint[ms_index] == 0) {
-            ms_index--;
+        // decrement, if the highest considered word of the bigint turned zero
+        if (nz_index > 0 && bigint[nz_index] == 0) {
+            nz_index--;
         }
     }
 
     // special case for the last tryte, where no further division is necessary
     trytes[NUM_CHUNK_TRYTES - 1] =
-        tryte_set_last_trit_zero(bigint[0] - (TRYTE_BASE / 2));
+        tryte_set_last_trit_zero(bigint[0] - HALF_TRYTE);
 }
 
 /** @brief Converts bigint consisting of 12 words into an array of bytes.
