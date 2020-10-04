@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  release:
+    types:
+      - created
+      
+env:
+  DOCKER_IMAGE: 'wollac/ledger-bolos'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v2
+      with:
+        submodules: recursive
+        
+    - name: Build
+      run: |
+        docker run -u $(id -u):$(id -g) -v $(pwd):/project -e BOLOS_SDK=/project/dev/sdk/nanos-secure-sdk $DOCKER_IMAGE make -C /project
+        zip -j nanos-app-${{ github.ref }}.zip bin/app.hex LICENSE README.md
+
+    - name: Upload
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./nanos-app-${{ github.ref }}.zip
+        asset_name: nanos-app-${{ github.ref }}.zip
+        asset_content_type: application/zip
