@@ -18,15 +18,19 @@ jobs:
         submodules: recursive
         
     - name: Get release version
-      id: get_version
       run: echo ::set-env name=RELEASE_VERSION::${GITHUB_REF#refs/tags/}
         
-    - name: Build
+    - name: Build Nano S
       run: |
         docker run -u $(id -u):$(id -g) -v $(pwd):/project -e BOLOS_SDK=/project/dev/sdk/nanos-secure-sdk $DOCKER_IMAGE make -C /project
         zip -j nanos-app-${{ env.RELEASE_VERSION }}.zip bin/app.hex LICENSE README.md
+        
+    - name: Build Blue
+      run: |
+        docker run -u $(id -u):$(id -g) -v $(pwd):/project -e BOLOS_SDK=/project/dev/sdk/blue-secure-sdk $DOCKER_IMAGE make -C /project
+        zip -j blue-app-${{ env.RELEASE_VERSION }}.zip bin/app.hex LICENSE README.md
 
-    - name: Upload
+    - name: Upload Nano S
       uses: actions/upload-release-asset@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -34,4 +38,14 @@ jobs:
         upload_url: ${{ github.event.release.upload_url }}
         asset_path: ./nanos-app-${{ env.RELEASE_VERSION }}.zip
         asset_name: nanos-app-${{ env.RELEASE_VERSION }}.zip
+        asset_content_type: application/zip
+        
+    - name: Upload Blue
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./blue-app-${{ env.RELEASE_VERSION }}.zip
+        asset_name: blue-app-${{ env.RELEASE_VERSION }}.zip
         asset_content_type: application/zip
