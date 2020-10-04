@@ -24,13 +24,13 @@ jobs:
       run: |
         docker run -u $(id -u):$(id -g) -v $(pwd):/project -e BOLOS_SDK=/project/dev/sdk/nanos-secure-sdk $DOCKER_IMAGE make -C /project
         zip -j nanos-app-${{ env.RELEASE_VERSION }}.zip bin/app.hex LICENSE README.md
-        make clean
+        rm -fr obj bin debug dep src/glyphs.c src/glyphs.h
         
     - name: Build Blue
       run: |
         docker run -u $(id -u):$(id -g) -v $(pwd):/project -e BOLOS_SDK=/project/dev/sdk/blue-secure-sdk $DOCKER_IMAGE make -C /project
         zip -j blue-app-${{ env.RELEASE_VERSION }}.zip bin/app.hex LICENSE README.md
-        make clean
+        rm -fr obj bin debug dep src/glyphs.c src/glyphs.h
 
     - name: Upload Nano S
       uses: actions/upload-release-asset@v1
